@@ -1,0 +1,4 @@
+body { font-family: system-ui, sans-serif; background: #1f1e24; color: #eee; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+main { max-width: 40rem; padding: 2rem; }
+h1 { color: #fc6d26; }
+code { background: #333; padding: .1rem .4rem; border-radius: 4px; }

@@ -1,0 +1,13 @@
+---
+- name: Paquets de base
+  ansible.builtin.apt:
+    name: [curl, ca-certificates, gnupg, git, jq, vim, unzip]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Résolution locale du FQDN GitLab (indépendante de nip.io)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '\s{{ gitlab_fqdn | regex_escape }}$'
+    line: "{{ gitlab_ip }} {{ gitlab_fqdn }}"

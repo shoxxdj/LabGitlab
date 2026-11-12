@@ -1,0 +1,32 @@
+# Profil "docker-priv" : scénario 2 — runner privilégié + docker.sock monté.
+include:
+  - local: ci/security-scans.yml
+
+stages: [build, security, deploy]
+
+build:
+  stage: build
+  tags: [docker]
+  image: alpine:3.20
+  script:
+    - echo "Build de ${CI_COMMIT_REF_NAME}"
+  artifacts:
+    paths: []
+
+docker-build:
+  stage: build
+  tags: [docker-priv]                              # ✗ runner privileged + docker.sock
+  image: docker:27
+  script:
+    - docker build -t vuln-app:latest .
+    # Preuve d'évasion (décommenter pour tester) :
+    # - docker run --rm -v /:/hostfs alpine chroot /hostfs cat /etc/shadow
+
+deploy:
+  stage: deploy
+  tags: [docker]
+  image: alpine:3.20
+  script:
+    - echo "Déploiement"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

@@ -1,0 +1,98 @@
+---
+# --- Réseau / DNS ------------------------------------------------------
+gitlab_ip: "192.168.56.10"
+runner_ip: "192.168.56.11"
+
+# nip.io = DNS wildcard public : *.192.168.56.10.nip.io -> 192.168.56.10
+# Hors-ligne ? Mettre base_domain: "lab.test" + dnsmasq sur l'hôte (voir README).
+base_domain: "{{ gitlab_ip }}.nip.io"
+gitlab_fqdn: "gitlab.{{ base_domain }}"
+gitlab_url: "http://{{ gitlab_fqdn }}"
+pages_domain: "pages.{{ base_domain }}"
+pages_url: "http://{{ pages_domain }}"
+
+# --- Comptes (LAB UNIQUEMENT) -------------------------------------------
+gitlab_root_password: "LabSecret#2026x"
+gitlab_root_pat: "glpat-LabBootstrapToken0001"   # PAT root créé au bootstrap
+gitlab_dev_username: "dev"
+gitlab_dev_password: "DevLabSecret#2026x"
+gitlab_group: "lab"
+
+# =========================================================================
+# PROFIL DE LAB — change le niveau de risque, sans toucher au reste.
+#   vagrant up                      -> utilise la valeur ci-dessous
+#   LAB_PROFILE=docker-priv vagrant up   -> surcharge ponctuelle
+#   vagrant provision runner        -> ré-applique un profil déjà en place
+#
+# Profils disponibles : default | secrets-leak | docker-priv | shell-exec | full-vulnerable
+# Voir docs/SECURITY-LAB.md pour le détail de chaque scénario.
+# =========================================================================
+lab_profile: "{{ lookup('env', 'LAB_PROFILE') | default('default', true) }}"
+
+# Catalogue de tous les runners possibles (un profil n'en active qu'une partie)
+all_runners:
+  docker:
+    name: lab-docker             # runner "sain" : conteneur non privilégié
+    executor: docker
+    tags: [docker]
+    run_untagged: true
+  docker-priv:
+    name: lab-docker-priv        # VOLONTAIREMENT faible : privileged + docker.sock
+    executor: docker
+    tags: [docker-priv]
+    run_untagged: false
+    privileged: true
+    docker_sock: true
+  shell:
+    name: lab-shell              # VOLONTAIREMENT faible : shell executor
+    executor: shell
+    tags: [shell]
+    run_untagged: false
+
+# Chaque profil = quels runners activer + quelle variante de .gitlab-ci.yml
+# seeder dans vuln-pipeline (fichiers dans
+# ansible/roles/gitlab_seed/files/projects/vuln-pipeline/ci-variants/) +
+# quelles variables CI (risquées ou non) créer sur ce projet.
+lab_profiles:
+  default:
+    description: "Runner docker sain uniquement. Pipeline propre (rules, pas de secret exposé)."
+    runner_keys: [docker]
+    vuln_variant: default
+    vuln_ci_variables: []
+
+  secrets-leak:
+    description: "Scénario 1 : fuite de secret CI via variable non protégée / artefacts."
+    runner_keys: [docker]
+    vuln_variant: secrets-leak
+    vuln_ci_variables:
+      - { key: PROD_DEPLOY_TOKEN,    value: "tok-prod-UNPROTECTED-8f3a91c2", protected: false }
+      - { key: PROTECTED_DEPLOY_KEY, value: "key-PROTECTED-main-only-77d0b1", protected: true }
+
+  docker-priv:
+    description: "Scénario 2 : runner Docker privilégié + docker.sock monté (évasion de conteneur)."
+    runner_keys: [docker, docker-priv]
+    vuln_variant: docker-priv
+    vuln_ci_variables: []
+
+  shell-exec:
+    description: "Scénario 3 : runner shell executor (accès direct à la VM runner)."
+    runner_keys: [docker, shell]
+    vuln_variant: shell-exec
+    vuln_ci_variables: []
+
+  full-vulnerable:
+    description: "Tous les scénarios cumulés : docker-priv + shell + secrets + injections."
+    runner_keys: [docker, docker-priv, shell]
+    vuln_variant: full-vulnerable
+    vuln_ci_variables:
+      - { key: PROD_DEPLOY_TOKEN,    value: "tok-prod-UNPROTECTED-8f3a91c2", protected: false }
+      - { key: PROTECTED_DEPLOY_KEY, value: "key-PROTECTED-main-only-77d0b1", protected: true }
+
+lab_profile_cfg: "{{ lab_profiles[lab_profile] }}"
+gitlab_runners: "{{ lab_profile_cfg.runner_keys | map('extract', all_runners) | list }}"
+
+# --- Runners (global) -----------------------------------------------------
+runner_docker_image: "alpine:3.20"
+runner_concurrent: 4
+
+gitlab_seed_projects: [demo-pages, vuln-pipeline]

@@ -1,0 +1,40 @@
+---
+- name: "Runner {{ item.name }} déjà enregistré ?"
+  ansible.builtin.command: grep -q 'name = "{{ item.name }}"' /etc/gitlab-runner/config.toml
+  register: runner_present
+  failed_when: false
+  changed_when: false
+
+- name: "Enregistrement de {{ item.name }}"
+  when: runner_present.rc != 0
+  block:
+    - name: "Création du runner {{ item.name }} dans GitLab (API)"
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/user/runners"
+        method: POST
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_root_pat }}"
+        body_format: json
+        body:
+          runner_type: instance_type
+          description: "{{ item.name }}"
+          tag_list: "{{ item.tags }}"
+          run_untagged: "{{ item.run_untagged | default(false) }}"
+        status_code: 201
+      register: runner_api
+      no_log: true
+
+    - name: "Register {{ item.name }} (executor {{ item.executor }})"
+      vars:
+        flags_docker: "--docker-image {{ runner_docker_image }} --docker-pull-policy if-not-present --docker-extra-hosts {{ gitlab_fqdn }}:{{ gitlab_ip }}"
+        flags_priv: "{{ '--docker-privileged' if item.privileged | default(false) else '' }}"
+        flags_sock: "{{ '--docker-volumes /var/run/docker.sock:/var/run/docker.sock' if item.docker_sock | default(false) else '' }}"
+        flags: "{{ (flags_docker ~ ' ' ~ flags_priv ~ ' ' ~ flags_sock) if item.executor == 'docker' else '' }}"
+      ansible.builtin.command: >
+        gitlab-runner register --non-interactive
+        --url {{ gitlab_url }}
+        --token {{ runner_api.json.token }}
+        --name {{ item.name }}
+        --executor {{ item.executor }}
+        {{ flags }}
+      no_log: true

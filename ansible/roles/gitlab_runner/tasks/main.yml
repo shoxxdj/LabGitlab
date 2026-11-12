@@ -1,0 +1,49 @@
+---
+- name: Docker
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+    update_cache: true
+
+- name: Docker démarré
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Script d'ajout du dépôt gitlab-runner
+  ansible.builtin.get_url:
+    url: https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh
+    dest: /tmp/gitlab-runner-repo.sh
+    mode: "0755"
+
+- name: Ajout du dépôt gitlab-runner
+  ansible.builtin.command: /tmp/gitlab-runner-repo.sh
+  args:
+    creates: /etc/apt/sources.list.d/runner_gitlab-runner.list
+
+- name: Installation de gitlab-runner
+  ansible.builtin.apt:
+    name: gitlab-runner
+    state: present
+    update_cache: true
+
+# VOLONTAIRE (lab) : le user du shell executor devient équivalent root via docker
+- name: gitlab-runner dans le groupe docker
+  ansible.builtin.user:
+    name: gitlab-runner
+    groups: docker
+    append: true
+
+- name: Nettoyage des runners qui ne font plus partie du profil actif
+  ansible.builtin.include_tasks: deregister_stale.yml
+
+- name: Enregistrement des runners du profil "{{ lab_profile }}"
+  ansible.builtin.include_tasks: register.yml
+  loop: "{{ gitlab_runners }}"
+
+- name: Concurrence globale
+  ansible.builtin.lineinfile:
+    path: /etc/gitlab-runner/config.toml
+    regexp: '^concurrent\s*='
+    line: "concurrent = {{ runner_concurrent }}"

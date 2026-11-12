@@ -1,0 +1,4 @@
+Flask==1.0
+Jinja2==2.10
+PyYAML==5.3
+requests==2.19.0

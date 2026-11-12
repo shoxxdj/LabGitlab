@@ -1,0 +1,23 @@
+# Profil "shell-exec" : scénario 3 — shell executor = accès direct à la VM runner.
+include:
+  - local: ci/security-scans.yml
+
+stages: [build, security, deploy]
+
+build:
+  stage: build
+  tags: [shell]                                    # ✗ shell executor directement sur la VM runner
+  script:
+    - bash -c "echo Build de la branche $CI_COMMIT_REF_NAME"   # ✗ injection via nom de branche
+    - whoami; id
+    # Preuve d'accès élargi (décommenter pour tester) :
+    # - docker run --rm -v /:/hostfs alpine cat /hostfs/root/.ssh/id_rsa 2>/dev/null || true
+
+deploy:
+  stage: deploy
+  tags: [docker]
+  image: alpine:3.20
+  script:
+    - echo "Déploiement"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

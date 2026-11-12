@@ -1,0 +1,42 @@
+# Jobs de sécurité "shift-left" 100 % open source (tournent sur GitLab CE).
+# Les images sont en :latest pour la simplicité du lab (à épingler en vrai !).
+.scan:
+  stage: security
+  allow_failure: true            # le lab veut voir les trouvailles sans bloquer
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: ["*-report.*"]
+
+secrets-gitleaks:
+  extends: .scan
+  image: { name: zricethezav/gitleaks:latest, entrypoint: [""] }
+  script:
+    - gitleaks detect --source . --no-banner --verbose --report-format json --report-path gitleaks-report.json
+
+sast-semgrep:
+  extends: .scan
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep scan --metrics off --config p/python --config p/gitlab --error --json --output semgrep-report.json .
+
+vuln-trivy:
+  extends: .scan
+  image: { name: aquasec/trivy:latest, entrypoint: [""] }
+  script:
+    - trivy fs --scanners vuln,secret,misconfig --format json --output trivy-report.json .
+    - trivy fs --scanners vuln,secret,misconfig --exit-code 1 --severity HIGH,CRITICAL .
+
+dockerfile-hadolint:
+  extends: .scan
+  image: hadolint/hadolint:latest-debian
+  script:
+    - hadolint -f json Dockerfile > hadolint-report.json || true
+    - hadolint Dockerfile
+
+iac-and-ci-checkov:
+  extends: .scan
+  image: { name: bridgecrew/checkov:latest, entrypoint: [""] }
+  script:
+    # framework gitlab_ci = audit de la configuration du pipeline lui-même
+    - checkov -d . --framework gitlab_ci terraform dockerfile --output cli --output json --output-file-path console,checkov-report.json

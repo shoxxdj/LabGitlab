@@ -1,0 +1,36 @@
+# ⚠️  PIPELINE VOLONTAIREMENT VULNÉRABLE — LAB DE SÉCURITÉ UNIQUEMENT ⚠️
+# Chaque "✗" est une mauvaise pratique à trouver, exploiter puis corriger.
+include:
+  - local: ci/security-scans.yml
+
+stages: [build, security, deploy]
+
+variables:
+  DB_PASSWORD: "SuperSecret123!"                  # ✗ secret en clair dans le dépôt
+
+build:
+  stage: build
+  tags: [shell]                                    # ✗ shell executor directement sur la VM runner
+  script:
+    - bash -c "echo Build de la branche $CI_COMMIT_REF_NAME"   # ✗ injection via nom de branche
+    - curl -sSL https://example.com/install.sh | sh || true    # ✗ curl | sh
+    - tar czf app.tgz app/ .env
+  artifacts:
+    paths: [app.tgz, .env]                         # ✗ .env publié en artefact
+    expire_in: never                               # ✗ jamais purgé
+
+docker-build:
+  stage: build
+  tags: [docker-priv]                              # ✗ runner privileged + docker.sock
+  image: docker:27
+  script:
+    - docker build -t vuln-app:latest .
+
+deploy:
+  stage: deploy
+  tags: [docker]
+  image: alpine:3.20
+  # ✗ pas de "rules:" : tourne sur n'importe quelle branche / MR
+  script:
+    - echo "Déploiement avec le token $PROD_DEPLOY_TOKEN"     # ✗ secret affiché dans les logs
+    - env | sort                                               # ✗ dump de l'environnement

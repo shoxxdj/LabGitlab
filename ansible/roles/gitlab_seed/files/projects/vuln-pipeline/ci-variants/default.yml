@@ -1,0 +1,25 @@
+# Profil "default" : bonnes pratiques de base. Rien de volontairement cassé ici.
+include:
+  - local: ci/security-scans.yml
+
+stages: [build, security, deploy]
+
+build:
+  stage: build
+  tags: [docker]
+  image: alpine:3.20
+  script:
+    - echo "Build de ${CI_COMMIT_REF_NAME}"
+    - tar czf app.tgz app/
+  artifacts:
+    paths: [app.tgz]
+    expire_in: 1 week
+
+deploy:
+  stage: deploy
+  tags: [docker]
+  image: alpine:3.20
+  script:
+    - echo "Déploiement (démo, pas de secret affiché)"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

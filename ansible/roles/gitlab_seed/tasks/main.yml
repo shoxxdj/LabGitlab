@@ -1,0 +1,137 @@
+---
+- name: "Profil de lab actif : {{ lab_profile }} — {{ lab_profile_cfg.description }}"
+  ansible.builtin.debug:
+    msg: "Runners : {{ gitlab_runners | map(attribute='name') | join(', ') }} | variante vuln-pipeline : {{ lab_profile_cfg.vuln_variant }}"
+
+- name: Copie des sources des projets de démo
+  ansible.builtin.copy:
+    src: projects/
+    dest: /opt/lab-seed/
+    mode: preserve
+
+- name: "Application de la variante CI '{{ lab_profile_cfg.vuln_variant }}' sur vuln-pipeline"
+  ansible.builtin.copy:
+    src: "/opt/lab-seed/vuln-pipeline/ci-variants/{{ lab_profile_cfg.vuln_variant }}.yml"
+    dest: /opt/lab-seed/vuln-pipeline/.gitlab-ci.yml
+    remote_src: true
+    mode: "0644"
+
+- name: Provisioning via l'API GitLab
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        PRIVATE-TOKEN: "{{ gitlab_root_pat }}"
+      body_format: json
+      return_content: true
+  block:
+    - name: Réglages d'instance (pas d'inscription, webhooks locaux autorisés)
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/application/settings"
+        method: PUT
+        body:
+          signup_enabled: false
+          allow_local_requests_from_web_hooks_and_services: true
+          auto_devops_enabled: false
+
+    - name: Groupe {{ gitlab_group }}
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/groups"
+        method: POST
+        body:
+          name: "{{ gitlab_group }}"
+          path: "{{ gitlab_group }}"
+          visibility: internal
+        status_code: [201, 400]
+
+    - name: Lecture du groupe
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/groups/{{ gitlab_group }}"
+      register: lab_group
+
+    - name: Utilisateur {{ gitlab_dev_username }}
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/users"
+        method: POST
+        body:
+          email: "{{ gitlab_dev_username }}@lab.local"
+          username: "{{ gitlab_dev_username }}"
+          name: "Dev Lab"
+          password: "{{ gitlab_dev_password }}"
+          skip_confirmation: true
+        status_code: [201, 400, 409]
+      no_log: true
+
+    - name: Lecture de l'utilisateur dev
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/users?username={{ gitlab_dev_username }}"
+      register: dev_user
+
+    - name: dev = Developer (30) dans le groupe
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/groups/{{ lab_group.json.id }}/members"
+        method: POST
+        body:
+          user_id: "{{ dev_user.json[0].id }}"
+          access_level: 30
+        status_code: [201, 409]
+
+    - name: Création des projets
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/projects"
+        method: POST
+        body:
+          name: "{{ item }}"
+          path: "{{ item }}"
+          namespace_id: "{{ lab_group.json.id }}"
+          visibility: internal
+        status_code: [201, 400]
+      loop: "{{ gitlab_seed_projects }}"
+
+    - name: Push des sources (initial, puis à chaque changement de profil pour vuln-pipeline)
+      ansible.builtin.shell: |
+        set -e
+        cd /opt/lab-seed/{{ item }}
+        if [ ! -d .git ]; then
+          git init -q -b main
+        fi
+        git add -A
+        if ! git diff --cached --quiet; then
+          git -c user.name="Lab Seed" -c user.email="seed@lab.local" commit -qm "Lab seed (profil {{ lab_profile }})"
+          git push -q "http://root:{{ gitlab_root_pat }}@{{ gitlab_fqdn }}/{{ gitlab_group }}/{{ item }}.git" main
+          echo changed
+        fi
+      register: push_result
+      changed_when: "'changed' in push_result.stdout"
+      loop: "{{ gitlab_seed_projects }}"
+      no_log: true
+
+    - name: ID du projet vuln-pipeline
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/projects/{{ gitlab_group }}%2Fvuln-pipeline"
+      register: vuln_project
+
+    - name: Variables CI existantes sur vuln-pipeline
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/projects/{{ vuln_project.json.id }}/variables"
+      register: existing_vuln_vars
+
+    - name: Suppression des variables qui ne font plus partie du profil actif
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/projects/{{ vuln_project.json.id }}/variables/{{ item }}"
+        method: DELETE
+        status_code: [204, 404]
+      loop: "{{ existing_vuln_vars.json | map(attribute='key') | list | difference(lab_profile_cfg.vuln_ci_variables | map(attribute='key') | list) }}"
+      when: existing_vuln_vars.json | length > 0
+
+    - name: "Variables CI du profil '{{ lab_profile }}' (voir docs/SECURITY-LAB.md)"
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/projects/{{ vuln_project.json.id }}/variables"
+        method: POST
+        body:
+          key: "{{ item.key }}"
+          value: "{{ item.value }}"
+          protected: "{{ item.protected }}"
+          masked: false
+        status_code: [201, 400]
+      loop: "{{ lab_profile_cfg.vuln_ci_variables }}"
+      no_log: true

@@ -1,0 +1,11 @@
+user = User.find_by_username('root')
+unless user.personal_access_tokens.find_by(name: 'lab-bootstrap')
+  token = user.personal_access_tokens.create(
+    scopes: ['api', 'create_runner', 'read_repository', 'write_repository'],
+    name: 'lab-bootstrap',
+    expires_at: 300.days.from_now
+  )
+  token.set_token('{{ gitlab_root_pat }}')
+  token.save!
+  puts 'created'
+end

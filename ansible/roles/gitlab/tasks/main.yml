@@ -1,0 +1,73 @@
+---
+- name: GitLab déjà installé ?
+  ansible.builtin.stat:
+    path: /opt/gitlab/bin/gitlab-ctl
+  register: gitlab_installed
+
+- name: Swap 2 Go (filet de sécurité mémoire)
+  ansible.builtin.shell: |
+    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  args:
+    creates: /swapfile
+
+- name: Script d'ajout du dépôt GitLab CE
+  ansible.builtin.get_url:
+    url: https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh
+    dest: /tmp/gitlab-ce-repo.sh
+    mode: "0755"
+
+- name: Ajout du dépôt GitLab CE
+  ansible.builtin.command: /tmp/gitlab-ce-repo.sh
+  args:
+    creates: /etc/apt/sources.list.d/gitlab_gitlab-ce.list
+
+- name: Répertoire /etc/gitlab
+  ansible.builtin.file:
+    path: /etc/gitlab
+    state: directory
+    mode: "0775"
+
+- name: Configuration gitlab.rb
+  ansible.builtin.template:
+    src: gitlab.rb.j2
+    dest: /etc/gitlab/gitlab.rb
+    mode: "0600"
+  notify: reconfigure gitlab
+
+- name: Installation de gitlab-ce (long, 5 à 15 min)
+  ansible.builtin.apt:
+    name: gitlab-ce
+    state: present
+    update_cache: true
+  environment:
+    EXTERNAL_URL: "{{ gitlab_url }}"
+
+- name: Attente de GitLab
+  ansible.builtin.uri:
+    url: "{{ gitlab_url }}/users/sign_in"
+    status_code: 200
+  register: gl_up
+  until: gl_up.status == 200
+  retries: 60
+  delay: 10
+
+- name: Script de bootstrap (PAT root)
+  # IMPORTANT : "gitlab-rails runner" exécute en interne en tant qu'utilisateur
+  # système "git", pas root. /root étant en 0700, git ne peut même pas y
+  # entrer ("file could not be found" alors que le chemin est correct) :
+  # on dépose donc le script dans /tmp, lisible par tous.
+  ansible.builtin.template:
+    src: bootstrap.rb.j2
+    dest: /tmp/gitlab-bootstrap.rb
+    mode: "0644"
+
+- name: Création du PAT root (idempotent)
+  ansible.builtin.command: gitlab-rails runner /tmp/gitlab-bootstrap.rb
+  register: bootstrap
+  changed_when: "'created' in bootstrap.stdout"
+
+- name: Suppression du script de bootstrap (contenait le PAT en clair)
+  ansible.builtin.file:
+    path: /tmp/gitlab-bootstrap.rb
+    state: absent

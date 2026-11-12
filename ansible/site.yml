@@ -1,0 +1,20 @@
+---
+- name: Socle commun
+  hosts: all
+  become: true
+  roles: [common]
+
+- name: GitLab CE + Pages
+  hosts: gitlab
+  become: true
+  roles: [gitlab]
+
+- name: GitLab Runners (docker, docker privilégié, shell)
+  hosts: runner
+  become: true
+  roles: [gitlab_runner]
+
+- name: Projets de démo, utilisateur dev, variables CI
+  hosts: gitlab
+  become: true
+  roles: [gitlab_seed]

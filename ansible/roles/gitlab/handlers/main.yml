@@ -1,0 +1,5 @@
+---
+# Ne s'exécute pas à la 1re installation (le paquet reconfigure déjà)
+- name: reconfigure gitlab
+  ansible.builtin.command: gitlab-ctl reconfigure
+  when: gitlab_installed.stat.exists

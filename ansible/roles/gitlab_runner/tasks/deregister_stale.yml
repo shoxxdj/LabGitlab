@@ -1,0 +1,19 @@
+---
+# Permet de changer de profil (ex : full-vulnerable -> default) via
+# `vagrant provision runner` sans laisser traîner d'anciens runners risqués.
+- name: config.toml existe ?
+  ansible.builtin.stat:
+    path: /etc/gitlab-runner/config.toml
+  register: runner_config
+
+- name: Lecture des noms de runners actuellement enregistrés
+  ansible.builtin.shell: >
+    grep '^\s*name = ' /etc/gitlab-runner/config.toml | sed -E 's/.*name = "(.*)"/\1/'
+  register: configured_runners
+  changed_when: false
+  when: runner_config.stat.exists
+
+- name: Dérégistrement des runners hors du profil actif
+  ansible.builtin.command: "gitlab-runner unregister --name {{ item }}"
+  loop: "{{ (configured_runners.stdout_lines | default([])) | difference(gitlab_runners | map(attribute='name') | list) }}"
+  when: runner_config.stat.exists

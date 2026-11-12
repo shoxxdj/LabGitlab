@@ -1,0 +1,24 @@
+# Projet "sain" : site statique publié via GitLab Pages + détection de secrets native GitLab
+include:
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+stages: [test, deploy]
+
+check-html:
+  stage: test
+  image: alpine:3.20
+  script:
+    - test -f site/index.html
+    - echo "HTML OK"
+
+pages:
+  stage: deploy
+  image: alpine:3.20
+  script:
+    - mkdir -p public
+    - cp -r site/* public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
